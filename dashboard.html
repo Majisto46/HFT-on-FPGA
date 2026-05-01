@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HFT FPGA Multi-Page Terminal</title>
+    <!-- LOCKED TO V4.1.1 TO PREVENT 'addLineSeries is not a function' BUG IN V5 -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        :root {
+            --bg: #0b0e14;
+            --panel: #151924;
+            --border: #2a2e39;
+            --text: #d1d4dc;
+            --neon-green: #26a69a;
+            --neon-red: #ef5350;
+            --neon-blue: #2962ff;
+            --sidebar: #0f1219;
+        }
+        body {
+            margin: 0; padding: 0; background-color: var(--bg); color: var(--text);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex; height: 100vh; overflow: hidden;
+        }
+
+        /* Sidebar Navigation */
+        .sidebar {
+            width: 250px; background: var(--sidebar); border-right: 1px solid var(--border);
+            display: flex; flex-direction: column; padding: 20px 0;
+        }
+        .sb-title { padding: 0 20px 20px; font-size: 18px; font-weight: bold; color: #fff; border-bottom: 1px solid var(--border); margin-bottom: 20px; letter-spacing: 1px;}
+        .sb-btn {
+            background: none; border: none; color: #aaa; text-align: left; padding: 15px 25px;
+            font-size: 15px; cursor: pointer; transition: 0.2s; font-weight: bold; border-left: 3px solid transparent;
+        }
+        .sb-btn:hover { background: rgba(255,255,255,0.05); color: #fff; }
+        .sb-btn.active { background: rgba(41, 98, 255, 0.1); color: var(--neon-blue); border-left: 3px solid var(--neon-blue); }
+
+        /* Main Content Container */
+        .main-content {
+            flex: 1; display: flex; flex-direction: column; overflow: auto; background: var(--bg);
+        }
+
+        /* Pages */
+        .page { display: none; padding: 20px; flex-direction: column; gap: 20px; height: 100%; box-sizing: border-box; overflow-y: auto; }
+        .page.active-page { display: flex; }
+
+        /* Header Reusables */
+        .header {
+            display: flex; justify-content: space-between; align-items: center;
+            background: var(--panel); border: 1px solid var(--border); padding: 15px 25px; border-radius: 8px;
+        }
+        .header h1 { margin: 0; font-size: 22px; color: #fff; }
+
+        /* Buttons and Status */
+        .controls { display: flex; gap: 15px; align-items: center; }
+        .action-btn {
+            background: transparent; border: 1px solid var(--border); color: #fff; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.3s;
+        }
+        select.action-btn { background: var(--panel); outline: none; appearance: menulist; border-color: #555;}
+        input.action-btn { background: var(--panel); border: 1px solid #555; color: #fff; outline: none; margin: 0 5px; cursor: text; padding: 10px;}
+        button.action-btn.active-load { background: var(--neon-blue); border-color: var(--neon-blue); }
+        button.action-btn.active-start { background: var(--neon-green); color: #000; border-color: var(--neon-green); }
+        button.action-btn.active-stop { background: var(--neon-red); color: #000; border-color: var(--neon-red); }
+        
+        .status { font-family: monospace; font-size: 16px; font-weight: bold; background: var(--sidebar); padding: 10px 15px; border-radius: 4px; border: 1px solid var(--border);}
+
+        /* Metrics */
+        .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
+        .metric-card { background: var(--panel); border: 1px solid var(--border); padding: 20px; border-radius: 8px; text-align: center; }
+        .metric-title { font-size: 12px; color: #888; text-transform: uppercase; margin-bottom: 8px; }
+        .metric-value { font-size: 28px; font-weight: bold; font-family: monospace; }
+        
+        /* Dashboard Layout */
+        .workspace { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; flex: 1; min-height: 0;}
+        .chart-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; }
+        .log-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; }
+        .panel-header { padding: 12px 20px; border-bottom: 1px solid var(--border); font-weight: bold; }
+        #chart-container { flex: 1.2; position: relative; min-height: 150px;}
+        #spread-container { flex: 1; position: relative; min-height: 120px;}
+        
+        /* Tables */
+        .log-table-wrapper { flex: 1; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; font-family: monospace; font-size: 13px; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        th { color: #888; position: sticky; top: 0; background: var(--panel); }
+        .log-buy { color: var(--neon-green); font-weight: bold; }
+        .log-sell { color: var(--neon-red); font-weight: bold; }
+
+        /* Seven Segment Display */
+        .seven-segment-sim { background: #000; padding: 15px; border-radius: 10px; border: 2px solid #222; box-shadow: inset 0 0 20px #ff000022; display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 10px; }
+        .seven-seg-text { font-family: 'Courier New', Courier, monospace; font-size: 48px; color: #ff0000; font-weight: bold; text-shadow: 0 0 10px #ff0000, 0 0 20px #ff0000; letter-spacing: 3px; }
+        .seven-seg-label { color: #555; font-size: 12px; margin-top: 8px; text-transform: uppercase; letter-spacing: 1px; }
+        
+        /* Education Page Specifics */
+        .edu-card { background: var(--panel); padding: 30px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 20px; line-height: 1.6; font-size: 15px;}
+        .edu-card h2 { color: var(--neon-blue); margin-top: 0;}
+        .highlight { color: #fff; font-weight: bold; background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px;}
+        
+    </style>
+</head>
+<body>
+
+    <!-- Sidebar Navigation -->
+    <div class="sidebar">
+        <div class="sb-title">DE10-Lite HFT System</div>
+        <button class="sb-btn active" onclick="switchPage('page-dashboard', this)">Trading Workspace</button>
+        <button class="sb-btn" onclick="switchPage('page-hardware', this)">Hardware Diagnostics</button>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="main-content">
+
+        <!-- ============================================== -->
+        <!-- PAGE 1: LIVE DASHBOARD -->
+        <!-- ============================================== -->
+        <div id="page-dashboard" class="page active-page">
+            <div class="header">
+                <div><h1>ARBITRAGE DASHBOARD</h1></div>
+                <div class="controls">
+                    <select id="pair-selector" class="action-btn" onchange="fillCustomPair(this.value)">
+                        <option value='{"ticker1":"TCS.NS", "ticker2":"INFY.NS"}'>TCS / INFY</option>
+                        <option value='{"ticker1":"RELIANCE.NS", "ticker2":"HDFCBANK.NS"}'>RELIANCE / HDFCBANK</option>
+                        <option value='{"ticker1":"ITC.NS", "ticker2":"SBIN.NS"}'>ITC / SBIN</option>
+                        <option value='{"ticker1":"BTCUSDT", "ticker2":"ETHUSDT"}'>Crypto: BTC / ETH (Binance)</option>
+                        <option value='{"ticker1":"SOLUSDT", "ticker2":"ADAUSDT"}'>Crypto: SOL / ADA (Binance)</option>
+                    </select>
+                    <input type="text" id="custom-t1" class="action-btn" placeholder="e.g. NVDA" style="width: 80px;" value="TCS.NS">
+                    <input type="text" id="custom-t2" class="action-btn" placeholder="e.g. AMD" style="width: 80px;" value="INFY.NS">
+                    <button class="action-btn active-load" onclick="loadCustomPair()" style="margin-right: 15px;">PULL ASSETS</button>
+
+                    <button id="btn-start" class="action-btn" onclick="sendCommand('start')">▶ START FEED</button>
+                    <button id="btn-stop" class="action-btn" onclick="sendCommand('stop')">⏹ PAUSE FEED</button>
+                    <button id="btn-cutoff" class="action-btn" onclick="sendCommand('cutoff')" style="background: #9c27b0; border-color: #9c27b0;">HALT TRADING</button>
+                    <div class="status" id="hw-status">LOADING...</div>
+                </div>
+            </div>
+
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-title"><span id="lbl-name1">TCS</span> Live Price</div>
+                    <div class="metric-value" id="val-tcs" style="color: #00aaff;">---</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-title"><span id="lbl-name2">INFY</span> Live Price</div>
+                    <div class="metric-value" id="val-infy" style="color: #ffaa00;">---</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-title">Statistical Spread</div>
+                    <div class="metric-value" id="val-spread">---</div>
+                </div>
+                <div class="metric-card" style="border-color: #444;">
+                    <div class="metric-title">FPGA Execution Engine</div>
+                    <div class="metric-value" id="val-state" style="font-size: 22px;">AWAITING...</div>
+                </div>
+            </div>
+
+            <div class="workspace">
+                <div class="chart-panel">
+                    <div class="panel-header" style="display: flex; justify-content: space-between;">
+                        <span>Live Dual-Asset Chart</span>
+                        <span id="val-pnl" style="color: var(--neon-green); font-family: monospace; font-size: 18px;">Total Profit: ₹0.00</span>
+                    </div>
+                    <div id="chart-container"></div>
+                    
+                    <div class="panel-header" style="border-top: 1px solid var(--border);">Statistical Spread Variance Tracker</div>
+                    <div id="spread-container"></div>
+                </div>
+                
+                <div class="log-panel">
+                    <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>Verilog Execution Ledger</span>
+                        <button onclick="downloadCSV()" class="action-btn" style="padding: 5px 10px; font-size: 12px; background: rgba(255,255,255,0.1);">[Download CSV]</button>
+                    </div>
+                    <div class="log-table-wrapper">
+                        <table>
+                            <thead><tr><th>Time</th><th>Action</th><th id="th-name1">TCS</th><th id="th-name2">INFY</th><th>PnL</th></tr></thead>
+                            <tbody id="log-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- PAGE 2: HARDWARE DIAGNOSTICS -->
+        <!-- ============================================== -->
+        <div id="page-hardware" class="page">
+            <div class="header"><h1>HARDWARE MONITORING SUITE</h1></div>
+            
+            <div class="metrics-grid">
+                <div class="metric-card" style="grid-column: span 2;">
+                    <div class="metric-title">Physical Serial Connection</div>
+                    <div class="metric-value" style="color: #fff;">115200 Baud (COM3)</div>
+                </div>
+                <div class="metric-card" style="grid-column: span 2;">
+                    <div class="metric-title">Hardware Round-Trip Latency</div>
+                    <div class="metric-value" id="val-latency" style="color: var(--neon-blue);">0.00 ms</div>
+                </div>
+            </div>
+
+            <div class="chart-panel" style="margin-top: 10px; flex-shrink: 0;">
+                <div class="panel-header">Real-Time Hardware Latency Histogram (ms)</div>
+                <div id="latency-chart-container" style="min-height: 250px;"></div>
+            </div>
+
+            <div class="seven-segment-sim" style="flex-shrink: 0;">
+                <div class="seven-seg-text" id="seg-display">00000.00</div>
+                <div class="seven-seg-label">DE10-Lite FPGA Board 7-Segment Profit Readout Mirror</div>
+            </div>
+            
+            <p style="text-align: center; color: #888; max-width: 600px; margin: 0 auto; line-height: 1.5;">
+                This page pulls real diagnostic data. The latency tracker measures the exact microscopic delay it takes to format the payload in Python, squirt it through the FTDI transceiver, process it in Verilog inside the Cyclone IV MAX10 chip, and return the byte decision flag back through the USB cable.
+            </p>
+        </div>
+
+    </div>
+
+    <script>
+        // Global Variables
+        var lastTimestamp = 0;
+        var lastTradeId = -1;
+        var pollingInterval = null;
+
+        // Tab Navigation Logic
+        function switchPage(pageId, btnElement) {
+            document.querySelectorAll('.page').forEach(el => el.classList.remove('active-page'));
+            document.querySelectorAll('.sb-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById(pageId).classList.add('active-page');
+            btnElement.classList.add('active');
+            
+            if(pageId === 'page-dashboard') {
+                setTimeout(() => {
+                    chart.resize(domElement.clientWidth, domElement.clientHeight);
+                    spreadChart.resize(spreadDom.clientWidth, spreadDom.clientHeight);
+                }, 10);
+            } else if (pageId === 'page-hardware') {
+                setTimeout(() => {
+                    latencyChart.resize(latencyDom.clientWidth, latencyDom.clientHeight);
+                }, 10);
+            }
+        }
+
+        // TradingView Charts
+        const chartProperties = {
+            layout: { background: { color: '#151924' }, textColor: '#d1d4dc' },
+            grid: { vertLines: { color: '#2a2e39' }, horzLines: { color: '#2a2e39' } },
+            timeScale: { timeVisible: true, secondsVisible: true }
+        };
+        
+        // Main Price Chart
+        const domElement = document.getElementById('chart-container');
+        const chart = LightweightCharts.createChart(domElement, {
+            ...chartProperties,
+            leftPriceScale: { visible: true, borderColor: '#2a2e39' },
+            rightPriceScale: { visible: true, borderColor: '#2a2e39' }
+        });
+        const tcsSeries = chart.addLineSeries({ color: '#00aaff', lineWidth: 2, title: 'Asset 1', priceScaleId: 'left' });
+        const infySeries = chart.addLineSeries({ color: '#ffaa00', lineWidth: 2, title: 'Asset 2', priceScaleId: 'right' });
+
+        // Spread Analysis Chart
+        const spreadDom = document.getElementById('spread-container');
+        const spreadChart = LightweightCharts.createChart(spreadDom, chartProperties);
+        const spreadSeries = spreadChart.addAreaSeries({ 
+            lineColor: '#b026ff', topColor: 'rgba(176, 38, 255, 0.4)', bottomColor: 'rgba(176, 38, 255, 0.0)' 
+        });
+        
+        // Latency Histogram Chart
+        const latencyDom = document.getElementById('latency-chart-container');
+        const latencyChart = LightweightCharts.createChart(latencyDom, chartProperties);
+        const latencySeries = latencyChart.addHistogramSeries({
+            color: '#2962ff',
+            priceFormat: { type: 'volume' },
+            priceScaleId: ''
+        });
+
+        window.addEventListener('resize', () => {
+            if(document.getElementById('page-dashboard').classList.contains('active-page')){
+                chart.resize(domElement.clientWidth, domElement.clientHeight);
+                spreadChart.resize(spreadDom.clientWidth, spreadDom.clientHeight);
+            } else if(document.getElementById('page-hardware').classList.contains('active-page')){
+                latencyChart.resize(latencyDom.clientWidth, latencyDom.clientHeight);
+            }
+        });
+
+        // Pair Changer
+        function fillCustomPair(val) {
+            try {
+                const p = JSON.parse(val);
+                document.getElementById('custom-t1').value = p.ticker1;
+                document.getElementById('custom-t2').value = p.ticker2;
+            } catch(e) {}
+        }
+
+        function downloadCSV() {
+            const rows = document.querySelectorAll('#log-body tr');
+            let csvContent = "Time,Action,Asset 1,Asset 2,PnL\n";
+            
+            rows.forEach(row => {
+                const cols = row.querySelectorAll('td');
+                if (cols.length > 0) {
+                    const rowData = Array.from(cols).map(c => c.innerText.replace(/₹/g, '').trim());
+                    csvContent += rowData.join(",") + "\n";
+                }
+            });
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", "HFT_Execution_Ledger.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function loadCustomPair() {
+            const t1 = document.getElementById('custom-t1').value || 'TCS.NS';
+            const t2 = document.getElementById('custom-t2').value || 'INFY.NS';
+            const payload = JSON.stringify({ticker1: t1, ticker2: t2});
+            
+            fetch('/api/set_pair', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: payload
+            }).then(() => {
+                tcsSeries.setData([]);
+                infySeries.setData([]);
+                spreadSeries.setData([]);
+                document.getElementById('log-body').innerHTML = "";
+                lastTimestamp = 0;
+                lastTradeId = -1;
+            });
+        }
+
+        // Backend Polling Data Fetch
+        function fetchUpdate() {
+            fetch('/api/data')
+                .then(r => r.json())
+                .then(data => {
+                    if(data.time === undefined) return;
+                    
+                    // Dynamic Labels
+                    document.getElementById('lbl-name1').innerText = data.name1;
+                    document.getElementById('lbl-name2').innerText = data.name2;
+                    document.getElementById('th-name1').innerText = data.name1;
+                    document.getElementById('th-name2').innerText = data.name2;
+                    tcsSeries.applyOptions({ title: data.name1 });
+                    infySeries.applyOptions({ title: data.name2 });
+                    
+                    document.getElementById('hw-status').innerText = data.hw_status;
+                    
+                    if(data.s1 === 0 && data.s2 === 0) {
+                        document.getElementById('val-tcs').innerText = "---";
+                        document.getElementById('val-infy').innerText = "---";
+                        document.getElementById('val-spread').innerText = "---";
+                    } else {
+                        document.getElementById('val-tcs').innerText = data.s1.toFixed(2);
+                        document.getElementById('val-infy').innerText = data.s2.toFixed(2);
+                        document.getElementById('val-spread').innerText = data.spread.toFixed(2);
+                    }
+                    
+                    const stateEl = document.getElementById('val-state');
+                    stateEl.innerText = data.action;
+                    stateEl.style.color = data.action_color;
+
+                    const pnlColor = data.pnl >= 0 ? 'var(--neon-green)' : 'var(--neon-red)';
+                    document.getElementById('val-pnl').innerText = `Total Profit: ₹${data.pnl.toFixed(2)}`;
+                    document.getElementById('val-pnl').style.color = pnlColor;
+
+                    document.getElementById('val-latency').innerText = `${data.latency_ms.toFixed(2)} ms`;
+                    
+                    let segText = data.pnl.toFixed(2);
+                    let paddingSize = 8 - segText.length;
+                    document.getElementById('seg-display').innerText = paddingSize > 0 ? "0".repeat(paddingSize) + segText : segText;
+
+                    const startBtn = document.getElementById('btn-start');
+                    const stopBtn = document.getElementById('btn-stop');
+                    const cutoffBtn = document.getElementById('btn-cutoff');
+                    
+                    if (data.is_running) {
+                        startBtn.classList.add('active-start');
+                        stopBtn.classList.remove('active-stop');
+                    } else {
+                        startBtn.classList.remove('active-start');
+                        stopBtn.classList.add('active-stop');
+                    }
+                    
+                    if (data.is_halted) {
+                        cutoffBtn.innerText = "RESUME TRADING";
+                        cutoffBtn.style.background = "#ff9800";
+                        cutoffBtn.style.borderColor = "#ff9800";
+                    } else {
+                        cutoffBtn.innerText = "HALT TRADING";
+                        cutoffBtn.style.background = "#9c27b0";
+                        cutoffBtn.style.borderColor = "#9c27b0";
+                    }
+
+                    if (data.is_running && data.time >= lastTimestamp && data.s1 > 0) {
+                        // Offset the UNIX timestamp directly so the chart forces local timezone display
+                        const tzOffsetOffset = new Date().getTimezoneOffset() * 60;
+                        const localChartTime = data.time - tzOffsetOffset;
+
+                        tcsSeries.update({ time: localChartTime, value: data.s1 });
+                        infySeries.update({ time: localChartTime, value: data.s2 });
+                        spreadSeries.update({ time: localChartTime, value: data.spread });
+                        
+                        // Dynamically color latency: orange if high latency (>11ms), standard blue otherwise
+                        const latColor = data.latency_ms > 11.0 ? 'rgba(239, 83, 80, 0.8)' : 'rgba(41, 98, 255, 0.8)';
+                        latencySeries.update({ time: localChartTime, value: data.latency_ms, color: latColor });
+                        
+                        if (data.trade && data.trade.id > lastTradeId) {
+                            const tbody = document.getElementById('log-body');
+                            const row = document.createElement('tr');
+                            const actionClass = data.trade.action.includes("BUY") ? "log-buy" : "log-sell";
+                            const pnlStyle = data.trade.pnl >= 0 ? `color: var(--neon-green)` : `color: var(--neon-red)`;
+                            
+                            row.innerHTML = `<td style="color: #666;">${data.trade.time}</td><td class="${actionClass}">${data.trade.action}</td><td>₹${data.trade.s1}</td><td>₹${data.trade.s2}</td><td style="${pnlStyle}">₹${data.trade.pnl}</td>`;
+                            tbody.prepend(row);
+                            if(tbody.children.length > 50) tbody.removeChild(tbody.lastChild);
+                            lastTradeId = data.trade.id;
+                        }
+                        lastTimestamp = data.time + 1; // Strict monotonic increase for lightweight charts due to 0.1s fast-refresh speed logic
+                    }
+                })
+                .catch(e => { document.getElementById('hw-status').innerText = '🔴 SERVER ERROR'; });
+        }
+
+        function sendCommand(cmd) {
+            fetch(`/api/${cmd}`, {method: 'POST'});
+            if(cmd === 'start' && !pollingInterval) {
+                pollingInterval = setInterval(fetchUpdate, 100);
+            } else if (cmd === 'stop' && pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+                fetchUpdate(); 
+            }
+        }
+        
+        fetchUpdate();
+        pollingInterval = setInterval(fetchUpdate, 500); 
+    </script>
+</body>
+</html>

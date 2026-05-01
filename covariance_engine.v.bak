@@ -1,0 +1,64 @@
+module covariance_engine (
+    input clk,
+    input rst_n,
+
+    input [31:0] return_s1,
+    input [31:0] return_s2,
+    input calc_done,
+
+    output reg [31:0] cov_out,
+    output reg cov_ready
+);
+
+    // pipeline registers
+    reg [63:0] mult_stage;
+    reg [31:0] prod_scaled;
+    reg calc_d1, calc_d2;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            mult_stage  <= 0;
+            prod_scaled <= 0;
+            cov_out     <= 0;
+            cov_ready   <= 0;
+            calc_d1     <= 0;
+            calc_d2     <= 0;
+        end
+        else begin
+
+            // pipeline control
+            calc_d1 <= calc_done;
+            calc_d2 <= calc_d1;
+
+            //-----------------------------------
+            // Stage 1 : multiply returns
+            //-----------------------------------
+            if (calc_done)
+                mult_stage <= return_s1 * return_s2;
+
+            //-----------------------------------
+            // Stage 2 : fixed point scaling
+            //-----------------------------------
+            if (calc_d1)
+                prod_scaled <= mult_stage[47:16];
+
+            //-----------------------------------
+            // Stage 3 : EWMA update
+            //-----------------------------------
+            if (calc_d2) begin
+
+                // EWMA
+                // cov = 0.25*(r1*r2) + 0.75*cov_old
+
+                cov_out <= (prod_scaled >> 2) +
+                           (cov_out - (cov_out >> 2));
+
+                cov_ready <= 1'b1;
+            end
+            else begin
+                cov_ready <= 1'b0;
+            end
+        end
+    end
+
+endmodule

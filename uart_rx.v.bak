@@ -1,0 +1,21 @@
+module uart_rx #(
+    parameter CLKS_PER_BIT = 434
+)(
+    input        clk,
+    input        rx_serial,     // ignored in SIM
+    output reg [7:0] rx_byte,
+    output reg       rx_dv
+);
+
+    // Fake UART generator
+    always @(posedge clk) begin
+        rx_dv <= 1'b0;
+
+        // generate a byte occasionally
+        if ($random % 20 == 0) begin
+            rx_byte <= $random;
+            rx_dv   <= 1'b1;   // 1-cycle pulse
+        end
+    end
+
+endmodule

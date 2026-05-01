@@ -1,0 +1,32 @@
+module portfolio_manager (
+    input clk,
+    input rst_n,
+    input data_valid,
+    input [15:0] current_price,
+    input [23:0] eigen1,
+    output reg [15:0] holdings,
+    output reg [31:0] total_profit
+);
+
+    reg [15:0] buy_price;
+    
+    // Simple Strategy: Buy if risk (Eigen) is low, Sell if risk is high
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            holdings <= 0;
+            total_profit <= 0;
+            buy_price <= 0;
+        end else if (data_valid) begin
+            // BUY Logic: If risk < 0x002000 and we have no stock
+            if (eigen1 < 24'h002000 && holdings == 0) begin
+                holdings <= 10; // Buy 10 units
+                buy_price <= current_price;
+            end 
+            // SELL Logic: If risk > 0x00A000 and we have stock
+            else if (eigen1 > 24'h00A000 && holdings > 0) begin
+                total_profit <= total_profit + ((current_price - buy_price) * holdings);
+                holdings <= 0;
+            end
+        end
+    end
+endmodule

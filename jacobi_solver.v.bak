@@ -1,0 +1,98 @@
+module jacobi_solver (
+    input clk,
+    input rst_n,
+
+    input [31:0] var1,
+    input [31:0] var2,
+    input [31:0] cov12,
+
+    input start,
+
+    output reg [31:0] eigen1,
+    output reg [31:0] eigen2,
+    output reg done
+);
+
+    // internal registers
+    reg [31:0] a;
+    reg [31:0] d;
+    reg [31:0] b;
+
+    reg [31:0] sum;
+    reg [31:0] diff;
+    reg [63:0] diff_sq;
+    reg [63:0] b_sq;
+    reg [63:0] sqrt_input;
+    reg [31:0] sqrt_val;
+
+    //----------------------------------
+    // simple sqrt function (integer)
+    //----------------------------------
+    function [31:0] isqrt;
+        input [63:0] x;
+        integer i;
+        reg [31:0] res;
+        reg [63:0] bit;
+        begin
+            res = 0;
+            bit = 1 << 62;
+
+            while (bit > x)
+                bit = bit >> 2;
+
+            for (i = 0; i < 32; i = i + 1) begin
+                if (x >= res + bit) begin
+                    x = x - (res + bit);
+                    res = (res >> 1) + bit;
+                end
+                else
+                    res = res >> 1;
+
+                bit = bit >> 2;
+            end
+
+            isqrt = res;
+        end
+    endfunction
+
+    //----------------------------------
+    // Jacobi calculation
+    //----------------------------------
+    always @(posedge clk or negedge rst_n) begin
+
+        if (!rst_n) begin
+            eigen1 <= 0;
+            eigen2 <= 0;
+            done   <= 0;
+        end
+
+        else begin
+            done <= 0;
+
+            if (start) begin
+
+                a <= var1;
+                d <= var2;
+                b <= cov12;
+
+                // compute sum and difference
+                sum  <= (var1 + var2) >> 1;
+                diff <= (var1 - var2) >> 1;
+
+                diff_sq <= diff * diff;
+                b_sq    <= cov12 * cov12;
+
+                sqrt_input <= diff_sq + b_sq;
+
+                sqrt_val <= isqrt(sqrt_input);
+
+                eigen1 <= sum + sqrt_val;
+                eigen2 <= sum - sqrt_val;
+
+                done <= 1'b1;
+
+            end
+        end
+    end
+
+endmodule

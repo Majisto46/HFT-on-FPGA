@@ -1,0 +1,55 @@
+module hft_top (
+    input        clk,
+    input        rst_n,
+    input        uart_rx_line,   // unused in SIM
+
+    output [15:0] current_price_s1,
+    output [15:0] current_price_s2,
+    output [31:0] s1_return_val,
+    output        calc_finished_pulse
+);
+
+    wire [7:0]  w_byte;
+    wire        w_dv;
+    wire [15:0] w_s1, w_s2;
+    wire        w_parser_vld;
+    wire        w_start;
+
+    uart_rx uart_inst (
+        .clk(clk),
+        .rx_serial(uart_rx_line),
+        .rx_byte(w_byte),
+        .rx_dv(w_dv)
+    );
+
+    Parser parser_inst (
+        .clk(clk),
+        .rst_n(rst_n),
+        .uart_data(w_byte),
+        .uart_ready(w_dv),
+        .price_s1(w_s1),
+        .price_s2(w_s2),
+        .data_valid(w_parser_vld)
+    );
+
+    order_book ob_inst (
+        .clk(clk),
+        .rst_n(rst_n),
+        .in_price_s1(w_s1),
+        .in_price_s2(w_s2),
+        .update_en(w_parser_vld),
+        .s1_reg(current_price_s1),
+        .s2_reg(current_price_s2),
+        .start_calc(w_start)
+    );
+
+    return_calc rc_inst (
+        .clk(clk),
+        .rst_n(rst_n),
+        .price_new(current_price_s1),
+        .start_calc(w_start),
+        .return_val(s1_return_val),
+        .calc_done(calc_finished_pulse)
+    );
+
+endmodule

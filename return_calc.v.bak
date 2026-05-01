@@ -1,0 +1,36 @@
+module return_calc (
+    input        clk,
+    input        rst_n,
+    input  [15:0] price_new,
+    input        start_calc,
+
+    output reg [31:0] return_val,
+    output reg        calc_done
+);
+
+    reg [15:0] price_old;
+    reg        initialized;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            price_old <= 0;
+            initialized <= 0;
+            return_val <= 0;
+            calc_done <= 0;
+        end else begin
+            calc_done <= 0;
+
+            if (start_calc) begin
+                if (!initialized) begin
+                    price_old <= price_new;
+                    initialized <= 1'b1;
+                end else begin
+                    return_val <= (price_new - price_old) << 16;
+                    price_old <= price_new;
+                    calc_done <= 1'b1;
+                end
+            end
+        end
+    end
+
+endmodule
